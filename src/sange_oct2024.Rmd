@@ -1,0 +1,127 @@
+---
+title: "Sanger workflow Oct 2024"
+author: "Gabe Runte"
+date: "2024-10-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(RColorBrewer)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(tidyverse)
+
+```
+
+
+# First, I wrangle the data from Geneious
+```{r}
+folder = here("data/sanger_data/oct_2024")
+
+# all trimmed sequences (bad sequences would have been removes hopefully)
+all_seqs = read_csv(here(folder, "sequences.csv")) %>% 
+  clean_names() %>% select(name, sequence) %>% 
+  filter(str_length(sequence)>100)
+
+# the consensus sequence associated with each contig from the assembly
+consensus = read_csv(here(folder, "consensus_sequences.csv"))%>% 
+  clean_names()%>% select(name, sequence)%>% 
+  rename(contig = name, contig_seq = sequence) %>% 
+  filter(str_length(contig_seq)>100) #remove any useless contigs
+
+# a mapping of sequence names onto contig assignments
+contigs = read_csv(here(folder, "contigs.csv"))%>% 
+  clean_names() %>% select(name,sequence_list_name) %>% 
+  rename(contig = sequence_list_name)
+
+# mash them all into 1 sheet with all important information
+seq = all_seqs %>% 
+  left_join(contigs) %>% 
+  left_join(consensus) %>% 
+  mutate(unite_seq = case_when(
+    is.na(contig)~ sequence, 
+    !is.na(contig) ~ contig_seq))
+  
+```
+
+# Next I need to map all of these sequences back to their relevance to the project by assigning them to plates, wells, and their associated sampling information. 
+```{r}
+#mapping sets 
+metadata = read_csv(here("data", "MBH Field Data - SequencingMetadata.csv")) %>% 
+  clean_names() %>% 
+  mutate(plate = as.numeric(str_sub(plate_id, 4,6)))
+
+total = seq %>% 
+  mutate(plate = as.numeric(str_sub(name, 5,7)))%>% 
+  mutate(column = as.numeric(str_sub(name, 10, 11)))%>% 
+  mutate(row = str_sub(name, 9,9)) %>% 
+  left_join(metadata)
+
+```
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/ghecto/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+unique_sequences = unique(total$unite_seq)
+tiptaxa = dada2::assignTaxonomy(unique_sequences, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+
+unite_taxa = tibble(as.data.frame(tiptaxa)) %>% 
+  mutate(unite_seq = rownames(tiptaxa))
+write_csv(unite_taxa, here(folder, "unite_output.csv"))
+
+
+library(DECIPHER)
+
+# Load the UNITE reference sequences
+ref_seqs <- readDNAStringSet("path/to/unite_database.fasta")
+
+# Create a database
+db <- IdTaxa(ref_seqs, trainingSet="UNITE", strand="both", processors=NULL)
+
+# Run taxonomic assignment on your sequences
+taxa <- IdTaxa(my_sequences, db, strand="both", processors=NULL)
+```
+
+```{r}
+unite_taxa = read_csv(here(folder, "unite_output.csv")) %>% 
+  clean_names()
+seq_taxa = seq_map %>% 
+  left_join(unite_taxa)
+
+seq_clean = seq_taxa %>% 
+  filter(!is.na(family)) %>% 
+  mutate(taxonomy = paste(kingdom, phylum, class, order, family, genus, species, sep = ";")) %>% 
+  mutate(sample = paste(plate, column, row, sep = "_"))
+
+
+
+
+fung_df = seq_clean %>% 
+  select(sample, taxonomy)
+
+write_csv(fung_df, here(folder, "taxa_funguild.csv"))
+#open file with xcel or other spreadsheet software then convert to .txt file at same file path (see below)
+here(folder, "taxa_funguild.txt")
+```
+ 
+
+```{bash, engine.opts='-l', eval = F}
+
+python /Users/Gabe/Desktop/phd/FUNGuild-master/Guilds_v1.1.py -otu /Users/Gabe/Desktop/phd/ghecto/data/sanger_data/total_project/taxa_funguild.txt
+
+```
+ 
+ 
+```{r}
+guilds = read_csv(here(folder, "taxa_funguild.guilds.csv"))
+
+seq_full = seq_clean %>% 
+  left_join(guilds)
+
+write_csv(seq_full, here(folder, "full_project_sangerdata.csv"))
+```
+ 
