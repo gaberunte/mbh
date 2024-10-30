@@ -59,7 +59,8 @@ total = seq %>%
   mutate(plate = as.numeric(str_sub(name, 5,7)))%>% 
   mutate(column = as.numeric(str_sub(name, 10, 11)))%>% 
   mutate(row = str_sub(name, 9,9)) %>% 
-  left_join(metadata)
+  left_join(metadata) %>% 
+  filter(!is.na(unite_seq))
 
 ```
 
@@ -73,23 +74,12 @@ unite_taxa = tibble(as.data.frame(tiptaxa)) %>%
   mutate(unite_seq = rownames(tiptaxa))
 write_csv(unite_taxa, here(folder, "unite_output.csv"))
 
-
-library(DECIPHER)
-
-# Load the UNITE reference sequences
-ref_seqs <- readDNAStringSet("path/to/unite_database.fasta")
-
-# Create a database
-db <- IdTaxa(ref_seqs, trainingSet="UNITE", strand="both", processors=NULL)
-
-# Run taxonomic assignment on your sequences
-taxa <- IdTaxa(my_sequences, db, strand="both", processors=NULL)
 ```
 
 ```{r}
 unite_taxa = read_csv(here(folder, "unite_output.csv")) %>% 
   clean_names()
-seq_taxa = seq_map %>% 
+seq_taxa = total %>% 
   left_join(unite_taxa)
 
 seq_clean = seq_taxa %>% 
@@ -111,7 +101,7 @@ here(folder, "taxa_funguild.txt")
 
 ```{bash, engine.opts='-l', eval = F}
 
-python /Users/Gabe/Desktop/phd/FUNGuild-master/Guilds_v1.1.py -otu /Users/Gabe/Desktop/phd/ghecto/data/sanger_data/total_project/taxa_funguild.txt
+python /Users/Gabe/Desktop/phd/FUNGuild-master/Guilds_v1.1.py -otu /Users/Gabe/Desktop/phd/mbh/data/sanger_data/oct_2024/taxa_funguild.txt
 
 ```
  
@@ -120,8 +110,85 @@ python /Users/Gabe/Desktop/phd/FUNGuild-master/Guilds_v1.1.py -otu /Users/Gabe/D
 guilds = read_csv(here(folder, "taxa_funguild.guilds.csv"))
 
 seq_full = seq_clean %>% 
-  left_join(guilds)
+  left_join(guilds) %>% 
+  mutate(morphotype = str_sub(morphotype, 1,1))
 
 write_csv(seq_full, here(folder, "full_project_sangerdata.csv"))
 ```
- 
+
+
+```{r}
+ggplot(seq_full, aes(x = morphotype, fill = genus))+
+  geom_bar()+facet_wrap(~core_id, scales = "free")+
+  theme(legend.position = "none")
+
+common_genera = seq_full %>% 
+  group_by(genus) %>% 
+  summarize(count = n()) %>% 
+  filter(count > 25)
+
+ggplot(seq_full %>% 
+         filter(genus %in% common_genera$genus)%>% 
+         filter(!is.na(genus)), aes(x = genus, fill = genus))+
+  geom_bar()
+
+
+ggplot(seq_full %>% 
+         mutate(genus_species = paste(str_sub(genus, 4), str_sub(species, 4), sep = "_")), 
+       aes(x = as.factor(plate), fill = genus_species))+
+  geom_bar()
+
+ggplot(seq_full, aes(x = morphotype, fill = genus))+
+  geom_bar()+facet_wrap(~plate_id, scales = "free")+
+  theme(legend.position = "none")
+```
+
+```{r, eval = F}
+sampling_data_all = read_csv(here("data", "MBH_TreeData.csv")) %>% 
+  clean_names()
+
+set1 = sampling_data_all %>% 
+  select(site, tree, uphill_soil, downhill_soil) %>% 
+  pivot_longer(cols= 3:4, names_to = "slope", values_to = "core")%>% 
+  mutate(slope = str_sub(slope, 1,-6))
+
+set1 = sampling_data_all %>% 
+  select(site, tree, uphill_soil, downhill_soil) %>% 
+  pivot_longer(cols= 3:4, names_to = "slope", values_to = "core")%>% 
+  mutate(slope = str_sub(slope, 1,-6)) %>% 
+  drop_na()
+
+set2 = sampling_data_all %>% 
+  select(site, tree, uphill_core_2, downhill_core_2) %>% 
+  pivot_longer(cols= 3:4, names_to = "slope", values_to = "core")%>% 
+  mutate(slope = str_sub(slope, 1,-8)) %>% 
+  drop_na()
+
+set3 = sampling_data_all %>% 
+  select(site, tree, uphill_core_3, downhill_core_3) %>% 
+  pivot_longer(cols= 3:4, names_to = "slope", values_to = "core")%>% 
+  mutate(slope = str_sub(slope, 1,-8)) %>% 
+  drop_na()
+
+core_tree = bind_rows(set1, set2, set3)
+
+#write_csv(core_tree, here("data", "core_to_tree.csv"))
+```
+
+
+```{r}
+core_tree = read_csv(here("data", "core_to_tree.csv")) %>% 
+  clean_names()
+
+seq_tree = seq_full %>% 
+  left_join(core_tree %>% 
+              rename(core_id = core)) %>% 
+  filter(!site == "JSDF")
+
+
+
+ggplot(seq_tree, aes(x = morphotype, fill = genus))+
+  geom_bar()+facet_wrap(~site, scales = "free")
+```
+
+
