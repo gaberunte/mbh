@@ -1,0 +1,127 @@
+---
+title: "soil_visualization"
+author: "Gabe Runte"
+date: "2024-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(raster)
+library(sf)
+library(tidyverse)
+```
+
+
+```{r, warning=F, message=F}
+tree_locations = read_csv(here("data", "tree_locations.csv")) %>% 
+  clean_names() %>% rename(tree = ns1_name) %>% select(lat, lon, tree) %>% 
+  mutate(tree = as.numeric(tree)) %>% 
+  drop_na() %>% filter(tree>900)
+
+tree_sites = read_csv(here("data", "core_to_tree.csv")) %>% 
+  clean_names() %>% 
+  mutate(core = as.numeric(str_sub(core, 5,))) %>% 
+  select(site, tree, core)#pulling out the columns we need
+
+soil_cn = read_csv(here("data/soil_analyses", "soil_cn_oct2024.csv")) %>% 
+  clean_names() %>% 
+  rename(core = sample_description_number_1) %>% 
+  select(2,4:6)
+
+soil_broad = read_csv(here("data/soil_analyses", "soil_nutrients_oct2024.csv")) %>% 
+  clean_names() %>% 
+  rename(core = sample_description_number_1) %>% 
+  select(2,4:26)
+
+soil_data = soil_cn %>% 
+  left_join(soil_broad) %>% 
+  left_join(tree_sites)
+
+tree_total = tree_locations %>% 
+  right_join(soil_data) %>% 
+  mutate(site_long = case_when(
+    site == "ANG" ~ "Angelo",
+    site == "PRS" ~ "Point Reyes",
+    site == "SQL" ~ "Soquel"
+  ))
+```
+
+## The data
+
+Here is what we have to play with. Core is the soil core number and is only really relevant for data wrangling. 
+```{r}
+DT::datatable(tree_total,
+  extensions = 'Buttons',
+  options = list(
+    dom = 'Bfrtip',
+    buttons = I('colvis')))
+```
+
+## Here are some basic boxplots of relevant soil data
+
+```{r, echo=FALSE}
+site_fill = scale_fill_manual(breaks = c("ANG", "PRS", "SQL"), values  = c("#667761", "#266DD3", "#DFC2F2"))
+
+ggplot(tree_total, aes(x = site_long, y = carbon_percent, fill = site))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.25), alpha = 0.5)+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+theme_minimal()+
+  labs(x = "", y = "Carbon Percent")+site_fill+theme(legend.position = "none")+
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1) )
+
+ggplot(tree_total, aes(x = site_long, y = nitrogen_percent, fill = site))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.25), alpha = 0.5)+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+theme_minimal()+
+  labs(x = "", y = "Nitrogen Percent")+site_fill+theme(legend.position = "none")+
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1) )
+
+ggplot(tree_total, aes(x = site_long, y = c_n_ratio, fill = site))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.25), alpha = 0.5)+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+theme_minimal()+
+  labs(x = "", y = "C:N Ratio")+site_fill+theme(legend.position = "none")+
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1) )
+
+ggplot(tree_total, aes(x = site_long, y = total_exchange_capacity_meq_100_g, fill = site))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.25), alpha = 0.5)+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+theme_minimal()+
+  labs(x = "", y = "Cation exchange capacity")+site_fill+theme(legend.position = "none")+
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1) )
+
+ggplot(tree_total, aes(x = site_long, y = p_h, fill = site))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.25), alpha = 0.5)+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+theme_minimal()+
+  labs(x = "", y = "pH")+site_fill+theme(legend.position = "none")+
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 1) )
+```
+
+
+## Showing a couple spatial plots for those curious
+
+```{r, echo = F}
+tree_spatial = st_as_sf(tree_total%>% 
+  filter(!is.na(lat)), coords= c(2,1)) 
+
+#plot(tree_spatial %>% filter(site == "ANG"))
+
+
+ggplot(tree_spatial %>% filter(site == "ANG")) +
+  geom_sf( size = 3, aes(color = c_n_ratio)) +
+  theme_minimal() +scale_color_gradient(limits = c(3,20))+
+  labs(title = "Angelo", color = "C:N")
+
+ggplot(tree_spatial %>% filter(site == "PRS")) +
+  geom_sf( size = 3, aes(color = c_n_ratio)) +
+  theme_minimal() +scale_color_gradient(limits = c(3,20)) +
+  labs(title = "Point Reyes", color = "C:N")
+
+ggplot(tree_spatial %>% filter(site == "SQL")) +
+  geom_sf( size = 3, aes(color = c_n_ratio)) +
+  theme_minimal() +scale_color_gradient(limits = c(3,20))+
+  labs(title = "Soquel", color = "C:N")
+```
+
+
+
